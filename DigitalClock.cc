@@ -1,15 +1,30 @@
 #include <windows.h>
+#include <math.h>
+
 #define ID_TIMER	1
 
+#define PI 3.141592653589793238463
+#define RAD(a) a*PI/180.0
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void Draw7Seg(HDC hdc, short dig, int group);
 void DrawSegment(HDC hdc, int index, RECT rect);
+int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate = 0);
+void FillSegmentData();
 
 HWND hwnd;
 
+// Segment data
+int xInitSize = 100, xSize, ySize;	// default width and height of segments element;
+float degree = 0;					// angle of segment
+int thickness, hth;					// thickness and it half of segment
+int space, gspace;					// distance between items in group and group itself
+int groupSpace;						// Step of group
+int totalWidth;						// total width
 
-int thickness; // thickness of segment
+const int sizePT = 6;   // number of segments points 
+POINT pt[7][sizePT];
+
 WORD cx, cy; // Client area size
 
 // Colors
@@ -75,7 +90,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 	HDC hdc;
 	switch (iMsg)
 	{
-	case WM_CREATE:
+	case WM_CREATE:  // without break! goto directly WM_TIMER to get init time
+		FillSegmentData();
 		if (!SetTimer(hwnd, ID_TIMER, 1000, NULL)) return EXIT_FAILURE;
 	case WM_TIMER:
 		GetLocalTime(&st);
@@ -102,18 +118,57 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-
-
-void  Draw7Seg(HDC hdc, short dig, int group)
+void FillSegmentData()
 {
-	int xSize = 80;
-	thickness = xSize / 5;
-	int space = thickness; // distance between items in group
-	int gspace = 4 * space;// distance between  group
-	int groupSpace = 2 * xSize + space + gspace; // Step of group
-	int ySize = 2 * xSize - thickness;
+	int shiftX = xInitSize * tan(RAD(degree)); // skew
+	xSize = xInitSize + shiftX;	// horisontal extension
+	thickness = xInitSize / 5;	// thickness of segment
+	hth = thickness / 2;		// half of thickness
+	space = thickness;			// distance between items in group
+	gspace = 4 * space;			// distance between  group
+	groupSpace = 2 * xSize + space + gspace;// Step of group
+	ySize = 2 * xInitSize - thickness;			// width of segment
+	int centerY = ySize / 2;// vertical center
 
-	int totalWidth = 3 * (2 * xSize + space) + 2 * gspace; // total width of 3 group + 2 space between groups 
+	totalWidth = 3 * (2 * xSize + space) + 2 * gspace; // total width of 3 group + 2 space between groups 
+
+	// points for origin sample segment 
+	POINT segmentSample[] = {				//	Segment origin sample (* is point)
+	{ 0, 0 },								//		 *---------*
+	{ hth,-hth },							//		*			*
+	{ xInitSize - 3 * hth - 1,-hth },		//		 *---------*
+	{ xInitSize - thickness - 1,0 },
+	{ xInitSize - 3 * hth - 1,hth },
+	{ hth,hth },
+	};
+
+	// Segment samples
+	TransformPoints(segmentSample, pt[0], shiftX+hth, hth);									// A
+	TransformPoints(segmentSample, pt[1], shiftX / 2 + xSize - hth - 1, hth, 1);			// B
+	TransformPoints(segmentSample, pt[2], xSize - hth - 1- shiftX / 2, centerY - 1, 1);		// C
+	TransformPoints(segmentSample, pt[3], hth, ySize - hth - 2);							// D
+	TransformPoints(segmentSample, pt[4], shiftX/2+hth, centerY - 1, 1);					// E
+	TransformPoints(segmentSample, pt[5], shiftX+hth, hth, 1);								// F
+	TransformPoints(segmentSample, pt[6], shiftX / 2 + hth, centerY - 1);					// G
+}
+
+void Draw7Seg(HDC hdc, short dig, int group)
+{
+	//  Segment structure
+
+	static int data[10][7] = {
+		//	  A	B C D E F G
+			{ 1,1,1,1,1,1,0 },	//0			//		 ---A---
+			{ 0,1,1,0,0,0,0 },	//1			//		|		|
+			{ 1,1,0,1,1,0,1 },	//2			//		F		B
+			{ 1,1,1,1,0,0,1 },	//3			//		|		|
+			{ 0,1,1,0,0,1,1 },	//4			//		 ---G---
+			{ 1,0,1,1,0,1,1 },	//5			//		|		|
+			{ 1,0,1,1,1,1,1 },	//6			//		E		C
+			{ 1,1,1,0,0,0,0 },	//7			//		|		|
+			{ 1,1,1,1,1,1,1 },	//8			//		 ---D---
+			{ 1,1,1,1,0,1,1 },	//9			//
+	};
 
 	int xPos = (cx - totalWidth) / 2, yPos = (cy - ySize) / 2; // Position of first group
 
@@ -124,26 +179,17 @@ void  Draw7Seg(HDC hdc, short dig, int group)
 
 	int dig1 = dig / 10, dig2 = dig % 10;
 
-	int data[10][7] = {
-		{ 1,1,1,1,1,1,0 },
-		{ 0,1,1,0,0,0,0 },
-		{ 1,1,0,1,1,0,1 },
-		{ 1,1,1,1,0,0,1 },
-		{ 0,1,1,0,0,1,1 },
-		{ 1,0,1,1,0,1,1 },
-		{ 1,0,1,1,1,1,1 },
-		{ 1,1,1,0,0,0,0 },
-		{ 1,1,1,1,1,1,1 },
-		{ 1,1,1,1,0,1,1 },
-	};
-
 	SelectObject(hdc, GetStockObject(DC_BRUSH));
 	SelectObject(hdc, GetStockObject(DC_PEN));
+
+	// Just for visual check real rect area
+	//Rectangle(hdc, rect1.left, rect1.top, rect1.right, rect1.bottom);
 
 	for (int i = 0; i < 7; i++)
 	{
 		// First digit
 		SetDCBrushColor(hdc, GREEN);
+		//SetDCPenColor(hdc, GREEN);
 		if (data[dig1][i] == 0)
 		{
 			SetDCPenColor(hdc, DARKGREEN);
@@ -153,6 +199,7 @@ void  Draw7Seg(HDC hdc, short dig, int group)
 
 		// Second digit
 		SetDCBrushColor(hdc, GREEN);
+		//SetDCPenColor(hdc, GREEN);
 		if (data[dig2][i] == 0)
 		{
 			SetDCPenColor(hdc, DARKGREEN);
@@ -160,65 +207,33 @@ void  Draw7Seg(HDC hdc, short dig, int group)
 		}
 		DrawSegment(hdc, i, rect2);
 	}
-
-
-
 }
 
-int TransformPoint(POINT* pts, POINT* ptd, int dx, int dy, int rotate = 0)
-{
-	int sizeP = 6;
 
-	for (int i = 0; i < sizeP; i++)
-	{
-		ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].y + dx + pts[0].x - pts[0].y;
-		ptd[i].y = rotate == 0 ? pts[i].y + dy : pts[i].x + dy - pts[0].x + pts[0].y;
-	}
-
-	return sizeP;
-}
 void DrawSegment(HDC hdc, int index, RECT rect)
 {
-	int hth = thickness / 2; // half of thickness
-	int middle = (rect.bottom + rect.top) / 2; // position of vertical center
-	int sizeX = rect.right - rect.left, sizeY = rect.bottom - rect.top;
-	int centerY = sizeY / 2;
+	static POINT ptDraw[sizePT]{};
 
-	POINT pth[] = {
-		{rect.left + hth, rect.top + hth},
-		{rect.left + thickness, rect.top},
-		{rect.right - thickness, rect.top},
-		{rect.right - hth, rect.top + hth},
-		{rect.right - thickness, rect.top + thickness},
-		{rect.left + thickness, rect.top + thickness},
-	};
-	POINT pt[sizeof(pth) / sizeof(pth[0])]{};
-
-	switch (index)
+	// set segment points to rect position 
+	for (int i = 0; i < sizePT; i++)
 	{
-	case 0: // A
-		TransformPoint(pth, pt, 0, 0);
-		break;
-	case 1: // B
-		TransformPoint(pth, pt, sizeX - thickness, 0, 1);
-		break;
-	case 2: // C
-		TransformPoint(pth, pt, sizeX - thickness, centerY - thickness / 2, 1);
-		break;
-	case 3: // D
-		TransformPoint(pth, pt, 0, sizeY - thickness);
-		break;
-	case 4: // E
-		TransformPoint(pth, pt, 0, centerY - thickness / 2, 1);
-		break;
-	case 5: // F
-		TransformPoint(pth, pt, 0, 0, 1);
-		break;
-	case 6: // G
-		TransformPoint(pth, pt, 0, centerY - thickness / 2);
-		break;
-	default:
-		return;
+		ptDraw[i].x = pt[index][i].x + rect.left;
+		ptDraw[i].y = pt[index][i].y + rect.top;
 	}
-	Polygon(hdc, pt, sizeof(pt) / sizeof(POINT));
+
+	Polygon(hdc, ptDraw, sizePT);
+}
+
+int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate)
+{
+	double angle = (90 + degree) * PI / 180.0;
+	for (int i = 0; i < sizePT; i++)
+	{
+		/*ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].y + dx + pts[0].x - pts[0].y;
+		ptd[i].y = rotate == 0 ? pts[i].y + dy : pts[i].x + dy - pts[0].x + pts[0].y;*/
+
+		ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].x * cos(angle) - pts[i].y * sin(angle) + dx;
+		ptd[i].y = rotate == 0 ? pts[i].y + dy : pts[i].x * sin(angle) + pts[i].y * cos(angle) + dy;
+	}
+	return sizePT;
 }
