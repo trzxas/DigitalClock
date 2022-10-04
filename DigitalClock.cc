@@ -16,7 +16,7 @@ HWND hwnd;
 
 // Segment data
 int xInitSize = 100, xSize, ySize;	// default width and height of segments element;
-float degree = 0;					// angle of segment
+float degree = 6;					// skew degree angle of segment (0-6 optimal)
 int thickness, hth;					// thickness and it half of segment
 int space, gspace;					// distance between items in group and group itself
 int groupSpace;						// Step of group
@@ -120,15 +120,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 
 void FillSegmentData()
 {
-	int shiftX = xInitSize * tan(RAD(degree)); // skew
-	xSize = xInitSize + shiftX;	// horisontal extension
-	thickness = xInitSize / 5;	// thickness of segment
-	hth = thickness / 2;		// half of thickness
-	space = thickness;			// distance between items in group
-	gspace = 4 * space;			// distance between  group
-	groupSpace = 2 * xSize + space + gspace;// Step of group
+	thickness = xInitSize / 5;					// thickness of segment
+	hth = thickness / 2;						// half of thickness
+	space = thickness;							// distance between items in group
+	gspace = 4 * space;							// distance between  group
 	ySize = 2 * xInitSize - thickness;			// width of segment
-	int centerY = ySize / 2;// vertical center
+	int centerY = ySize / 2;					// vertical center
+	int shiftX = ySize * tan(RAD(degree));		// skew (horisontal extension)
+	xSize = xInitSize + shiftX;					// total width of element
+	groupSpace = 2 * xSize + space + gspace;	// Step of group
 
 	totalWidth = 3 * (2 * xSize + space) + 2 * gspace; // total width of 3 group + 2 space between groups 
 
@@ -143,13 +143,13 @@ void FillSegmentData()
 	};
 
 	// Segment samples
-	TransformPoints(segmentSample, pt[0], shiftX+hth, hth);									// A
-	TransformPoints(segmentSample, pt[1], shiftX / 2 + xSize - hth - 1, hth, 1);			// B
-	TransformPoints(segmentSample, pt[2], xSize - hth - 1- shiftX / 2, centerY - 1, 1);		// C
-	TransformPoints(segmentSample, pt[3], hth, ySize - hth - 2);							// D
-	TransformPoints(segmentSample, pt[4], shiftX/2+hth, centerY - 1, 1);					// E
-	TransformPoints(segmentSample, pt[5], shiftX+hth, hth, 1);								// F
-	TransformPoints(segmentSample, pt[6], shiftX / 2 + hth, centerY - 1);					// G
+	TransformPoints(segmentSample, pt[0], hth + shiftX, hth);									// A
+	TransformPoints(segmentSample, pt[1], xSize - hth - 1, hth, 1);								// B	(no changed by a skew)
+	TransformPoints(segmentSample, pt[2], xSize - hth - 1 - shiftX / 2, centerY - 1, 1);		// C
+	TransformPoints(segmentSample, pt[3], hth, ySize - hth - 2);								// D	(no changed by a skew)
+	TransformPoints(segmentSample, pt[4], hth + shiftX / 2, centerY - 1, 1);					// E
+	TransformPoints(segmentSample, pt[5], hth + shiftX, hth, 1);								// F
+	TransformPoints(segmentSample, pt[6], shiftX / 2 + hth, centerY - 1);						// G
 }
 
 void Draw7Seg(HDC hdc, short dig, int group)
@@ -226,7 +226,8 @@ void DrawSegment(HDC hdc, int index, RECT rect)
 
 int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate)
 {
-	double angle = (90 + degree) * PI / 180.0;
+	int grdAngle = 90 + degree;
+	double angle = RAD(grdAngle);
 	for (int i = 0; i < sizePT; i++)
 	{
 		/*ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].y + dx + pts[0].x - pts[0].y;
