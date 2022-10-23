@@ -1,42 +1,13 @@
-#include <windows.h>
-#include <math.h>
+#include "DigitalClock.h"
+#include "segment.h"
 
-#define ID_TIMER	1
-#define IDM_EXIT	100
+HWND hwnd;			// main window descriptor
+HMENU hMenu;		// main menu descriptor
+HWND hwndSegment[6];	// 7segmnet element descriptors (for 6 digits of time)
+//HWND segHwnd;
+int countSegElem = sizeof(hwndSegment) / sizeof(HWND);
 
-
-#define FIRSTCOLOR 200
-#define IDM_SETREDCOLOR FIRSTCOLOR+1
-#define IDM_SETYELLOWCOLOR FIRSTCOLOR+2
-#define IDM_SETGREENCOLOR FIRSTCOLOR+3
-#define IDM_SETTURQUOISECOLOR FIRSTCOLOR+4
-#define IDM_SETBLUECOLOR FIRSTCOLOR+5
-#define IDM_SETPURPLECOLOR FIRSTCOLOR+6
-#define IDM_CYCLIC FIRSTCOLOR+7
-
-
-#define COLORMENUPOSITION(color) color-FIRSTCOLOR
-
-#define PI 3.141592653589793238463
-#define RAD(a) a*PI/180.0
-
-#define GETR(rgb) rgb>>0 & 0xFF
-#define GETG(rgb) rgb>>8 & 0xFF
-#define GETB(rgb) rgb>>16 & 0xFF
-
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-void Draw7Seg(HDC hdc, short dig, int group);
-void DrawSegment(HDC hdc, int index, RECT rect);
-int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate = 0);
-void FillSegmentData();
-HMENU CreateMainMenu();
-void SetPenColor(COLORREF color);
-void CheckColorMenuItem(DWORD item);
-void SetCyclicColor();
-int GetCyclicColorMode();
-
-HWND hwnd;		// main window descriptor
-HMENU hMenu;	// main menu descriptor
+HINSTANCE hInst;
 
 BOOL isCyclicColor = false;
 int currentMode;
@@ -51,28 +22,22 @@ int colorInc[7][3] = {
 	{0,0,-1},	// RB->R
 };
 
-// Segment data
-int xInitSize = 120, xSize, ySize;	// default width and height of segments element;
-float degree = 5;					// skew degree angle of segment (0-6 optimal)
-int thickness, hth;					// thickness and it half of segment
-int space, gspace;					// distance between items in group and group itself
-int groupSpace;						// Step of group
-int totalWidth;						// total width
-
-const int sizePT = 6;   // number of segments points 
-POINT pt[7][sizePT];
+// day of week
+const TCHAR* dow[] = { TEXT("Sunday"), TEXT("Monday"), TEXT("Tuesday"),
+		TEXT("Wednesday"), TEXT("Thursday"), TEXT("Friday"), TEXT("Saturday") };
 
 WORD cx, cy; // Client area size
 
-// Colors
-COLORREF lightPen;
-COLORREF darkPen;
-COLORREF BLACK = RGB(0, 0, 0);
+
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PSTR szCmdLine, _In_ int iCmdShow)
 {
 	TCHAR szClassName[] = TEXT("myApp");
 	TCHAR szWinCaption[] = TEXT("7-segment digital clock");
+
+	hInst = hInstance;
+
+	CustomRegister();
 
 	// use C++ style
 	WNDCLASSEX wndclass{};
@@ -117,6 +82,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		//TranslateMessage(&msg);		// Convert keybord messages to symbol 
 		DispatchMessage(&msg);			// Call call-back window proc
 	}
+
+	CustomUnregister();
 	return (int)msg.wParam;
 }
 
@@ -131,39 +98,92 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 	DWORD commandID;
 	TCHAR colorInfo[64]{};
 
+
+	int space;					// distance between  group
+	int totalWidth;				// total width of 6 segment elements with space
+
+	RECT rectColor = { 0,0,100,30 }; // color code position
+	RECT rectText{}; // text position
+
+	TCHAR text[1024];
+	TCHAR date[12];
+
+	static HFONT hFontOriginal, hFont1;
+	SIZE size, sizeText;
+	int strCount;
+
 	switch (iMsg)
 	{
 	case WM_CREATE:  // without break! goto directly WM_TIMER to get init time
 		// Create and set main menu
 		hMenu = CreateMainMenu();
 		SetMenu(hwnd, hMenu);
-		// Set init data
-		FillSegmentData();
-		// Set color
-		PostMessage(hwnd, WM_COMMAND, IDM_SETREDCOLOR, NULL);
-		PostMessage(hwnd, WM_COMMAND, IDM_CYCLIC, NULL);
+
+		// Create additional fonts
+		hFont1 = CreateFont(100, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
+			CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
+
+		// Create 7-segment elements
+		for (int i = 0; i < countSegElem; i++)
+		{
+			hwndSegment[i] = CreateWindow(SEGMENT_WC, NULL, WS_CHILD | WS_VISIBLE,
+				0, 0, 0, 0, hwnd, NULL, hInst, NULL);
+		}
+
+		// Set init color
+		SendMessage(hwndSegment[0], SSM_CHANGECOLOR, RGB(255, 0, 0), NULL);
+		//PostMessage(hwnd, WM_COMMAND, IDM_CYCLIC, NULL);
+
 		// Set timer
 		if (!SetTimer(hwnd, ID_TIMER, 1000, NULL)) return EXIT_FAILURE;
 	case WM_TIMER:
 		if (isCyclicColor) SetCyclicColor();
 		GetLocalTime(&st);
-		InvalidateRect(hwnd, nullptr, TRUE);
+		DrawTime(&st);
 		break;
 	case WM_PAINT:
 		hdc = BeginPaint(hwnd, &ps);
-		Draw7Seg(hdc, st.wHour, 0);		// Draw hours
-		Draw7Seg(hdc, st.wMinute, 1);	// Draw minutes
-		Draw7Seg(hdc, st.wSecond, 2);	// Draw seconds
-		TextOut(hdc, 0, 0, colorInfo,
-			wsprintf(colorInfo, TEXT("Color: %i"), lightPen));
+		SetTextColor(hdc, GetSegmentColor()); // get current color of segment indicator
+		SetBkColor(hdc, RGB(0, 0, 0));
+
+		TextOut(hdc, 0, 0, colorInfo, wsprintf(colorInfo, TEXT("Color: %i"), GetSegmentColor()));
+
+		// set big size font
+		hFontOriginal = (HFONT)SelectObject(hdc, hFont1);
+
+		// Draw day of week
+		lstrcpy(text, dow[st.wDayOfWeek]);
+		GetTextExtentPoint(hdc, text, lstrlen(text), &sizeText);
+		rectText.left = (cx - sizeText.cx) / 2;
+		rectText.right = rectText.left + sizeText.cx;
+		rectText.bottom = rectText.top + sizeText.cy;
+		DrawText(hdc, text, -1, &rectText, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+
+		// fill string with current date and get string length  
+		strCount = wsprintf(date, TEXT("%02d.%02d.%04d"), st.wDay,st.wMonth,st.wYear);
+		
+		// get string in pixels and draw date
+		GetTextExtentPoint(hdc, date, strCount, &size);
+		TextOut(hdc, (cx - size.cx) / 2, 3 * cy / 4, date, strCount);
+
 		EndPaint(hwnd, &ps);
 		break;
 	case WM_SIZE:
 		// Get client size
 		cx = LOWORD(lParam);
 		cy = HIWORD(lParam);
-		xInitSize = cx / 9;
-		FillSegmentData();
+		SetSegmentWidth(cx / 7);
+
+		space = wndWidth / 3;
+		totalWidth = 6 * wndWidth + 2 * space;
+
+		// Set 7-segmnet element position
+		for (int i = 0; i < countSegElem; i++)
+		{
+			SetWindowPos(hwndSegment[i], NULL,
+				(cx - totalWidth) / 2 + wndWidth * i + i / 2 * space, (cy - wndHeight) / 3,
+				wndWidth, wndHeight, SWP_NOZORDER);
+		}
 		break;
 	case WM_LBUTTONDBLCLK:
 		isFullScreenMode = ~isFullScreenMode;
@@ -171,13 +191,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		if (isFullScreenMode) // Set full-screen mode
 		{
 			SetMenu(hwnd, NULL);  // hide menu
-			SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+			SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW); // Change window style
 			SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
 		}
 		else // Set windowed mode
 		{
 			SetMenu(hwnd, hMenu); // show menu
-			SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+			SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW); // Change window style
 			SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
 		}
 		break;
@@ -186,22 +206,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		switch (commandID)
 		{
 		case IDM_SETREDCOLOR:
-			SetPenColor(RGB(255, 0, 0));
+			SetColor(RGB(255, 0, 0));
 			break;
 		case IDM_SETYELLOWCOLOR:
-			SetPenColor(RGB(255, 255, 0));
+			SetColor(RGB(255, 255, 0));
 			break;
 		case IDM_SETGREENCOLOR:
-			SetPenColor(RGB(0, 255, 0));
+			SetColor(RGB(0, 255, 0));
 			break;
 		case IDM_SETTURQUOISECOLOR:
-			SetPenColor(RGB(0, 255, 255));
+			SetColor(RGB(0, 255, 255));
 			break;
 		case IDM_SETBLUECOLOR:
-			SetPenColor(RGB(0, 0, 255));
+			SetColor(RGB(0, 0, 255));
 			break;
 		case IDM_SETPURPLECOLOR:
-			SetPenColor(RGB(255, 0, 255));
+			SetColor(RGB(255, 0, 255));
 			break;
 		case IDM_CYCLIC:
 			isCyclicColor = true; // Enable cyclic color mode;
@@ -214,6 +234,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		CheckColorMenuItem(commandID);
 		break;
 	case WM_DESTROY:
+		DeleteObject(hFont1);
 		PostQuitMessage(0);
 		break;
 	default:
@@ -237,147 +258,18 @@ HMENU CreateMainMenu()
 	AppendMenu(hMenuPopup, MF_STRING, IDM_CYCLIC, TEXT("Ñyclic"));
 
 
-	AppendMenu(hMenu, MF_POPUP, (UINT)hMenuPopup, TEXT("&Color"));
+	AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hMenuPopup, TEXT("&Color"));
 	AppendMenu(hMenu, MF_STRING, IDM_EXIT, TEXT("E&xit"));
-
-
 
 	return hMenu;
 }
 
-void FillSegmentData()
+void SetColor(COLORREF color)
 {
-	thickness = xInitSize / 5;					// thickness of segment
-	hth = thickness / 2;						// half of thickness
-	space = thickness;							// distance between items in group
-	gspace = 3 * space;							// distance between  group
-	ySize = 2 * xInitSize - thickness;			// width of segment
-	int centerY = ySize / 2;					// vertical center
-	int shiftX = ySize * tan(RAD(degree));		// skew (horisontal extension)
-	xSize = xInitSize + shiftX;					// total width of element
-	groupSpace = 2 * xSize + space + gspace;	// Step of group
-
-	totalWidth = 3 * (2 * xSize + space) + 2 * gspace; // total width of 3 group + 2 space between groups 
-
-	// points for origin sample segment 
-	POINT segmentSample[] = {				//	Segment origin sample (* is point)
-	{ 0, 0 },								//		 *---------*
-	{ hth,-hth },							//		*			*
-	{ xInitSize - 3 * hth - 1,-hth },		//		 *---------*
-	{ xInitSize - thickness - 1,0 },
-	{ xInitSize - 3 * hth - 1,hth },
-	{ hth,hth },
-	};
-
-	// Segment samples
-	TransformPoints(segmentSample, pt[0], hth + shiftX, hth);									// A
-	TransformPoints(segmentSample, pt[1], xSize - hth - 1, hth, 1);								// B	(no changed by a skew)
-	TransformPoints(segmentSample, pt[2], xSize - hth - 1 - shiftX / 2, centerY - 1, 1);		// C
-	TransformPoints(segmentSample, pt[3], hth, ySize - hth - 2);								// D	(no changed by a skew)
-	TransformPoints(segmentSample, pt[4], hth + shiftX / 2, centerY - 1, 1);					// E
-	TransformPoints(segmentSample, pt[5], hth + shiftX, hth, 1);								// F
-	TransformPoints(segmentSample, pt[6], shiftX / 2 + hth, centerY - 1);						// G
-}
-
-void Draw7Seg(HDC hdc, short dig, int group)
-{
-	//  Segment structure
-
-	static int data[10][7] = {
-		//	  A	B C D E F G
-			{ 1,1,1,1,1,1,0 },	//0			//		 ---A---
-			{ 0,1,1,0,0,0,0 },	//1			//		|		|
-			{ 1,1,0,1,1,0,1 },	//2			//		F		B
-			{ 1,1,1,1,0,0,1 },	//3			//		|		|
-			{ 0,1,1,0,0,1,1 },	//4			//		 ---G---
-			{ 1,0,1,1,0,1,1 },	//5			//		|		|
-			{ 1,0,1,1,1,1,1 },	//6			//		E		C
-			{ 1,1,1,0,0,0,0 },	//7			//		|		|
-			{ 1,1,1,1,1,1,1 },	//8			//		 ---D---
-			{ 1,1,1,1,0,1,1 },	//9			//
-	};
-
-	int xPos = (cx - totalWidth) / 2, yPos = (cy - ySize) / 2; // Position of first group
-
-	RECT rect1{ 0,0,xSize,ySize };
-	OffsetRect(&rect1, xPos + groupSpace * group, yPos);
-	RECT rect2 = rect1;
-	OffsetRect(&rect2, xInitSize + space, 0);
-
-	int dig1 = dig / 10, dig2 = dig % 10;
-
-	SelectObject(hdc, GetStockObject(DC_BRUSH));
-	SelectObject(hdc, GetStockObject(DC_PEN));
-	SetDCPenColor(hdc, darkPen);
-
-	// Just for visual check real rect area
-	//Rectangle(hdc, rect1.left, rect1.top, rect1.right, rect1.bottom);
-
-	for (int i = 0; i < 7; i++)
-	{
-		// First digit
-		SetDCBrushColor(hdc, lightPen);
-
-		if (data[dig1][i] == 0)
-		{
-			SetDCBrushColor(hdc, BLACK);
-		}
-		DrawSegment(hdc, i, rect1);
-
-		// Second digit
-		SetDCBrushColor(hdc, lightPen);
-
-		if (data[dig2][i] == 0)
-		{
-			SetDCBrushColor(hdc, BLACK);
-		}
-		DrawSegment(hdc, i, rect2);
-	}
-}
-
-
-void DrawSegment(HDC hdc, int index, RECT rect)
-{
-	static POINT ptDraw[sizePT]{};
-
-	// set segment points to rect position 
-	for (int i = 0; i < sizePT; i++)
-	{
-		ptDraw[i].x = pt[index][i].x + rect.left;
-		ptDraw[i].y = pt[index][i].y + rect.top;
-	}
-
-	Polygon(hdc, ptDraw, sizePT);
-}
-
-int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate)
-{
-	int grdAngle = 90 + degree;
-	double angle = RAD(grdAngle);
-	for (int i = 0; i < sizePT; i++)
-	{
-		/*ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].y + dx + pts[0].x - pts[0].y;
-		ptd[i].y = rotate == 0 ? pts[i].y + dy : pts[i].x + dy - pts[0].x + pts[0].y;*/
-
-		ptd[i].x = rotate == 0 ? pts[i].x + dx : pts[i].x * cos(angle) - pts[i].y * sin(angle) + dx;
-		ptd[i].y = rotate == 0 ? pts[i].y + dy : pts[i].x * sin(angle) + pts[i].y * cos(angle) + dy;
-	}
-	return sizePT;
-}
-
-void SetPenColor(COLORREF color)
-{
-	int tempColor;
-	lightPen = color;
-	darkPen = 0;
-	//isCyclicColor = false; // Disable cyclic color mode;
-
-	// Set DARKPEN as LIGHTPEN/8
-	for (int i = 0; i < 3; i++)
-	{
-		tempColor = (color >> (8 * i) & 0xFF) >> 3;
-		darkPen |= (tempColor << (8 * i));
-	}
+	isCyclicColor = false;
+	PostMessage(hwndSegment[0], SSM_CHANGECOLOR, color, NULL);
+	// Redraw window
+	InvalidateRect(hwnd, NULL, false);
 
 }
 
@@ -392,28 +284,41 @@ void CheckColorMenuItem(DWORD item)
 	}
 }
 
-
-void GetCurrentMode()
+void DrawTime(SYSTEMTIME* st)
 {
+	static SYSTEMTIME pst{ 99,99,99,99,99,99,99 };  // prev time value
+	// Draw seconds
+	SetSegmentData(hwndSegment[5], (*st).wSecond % 10);
+	if (pst.wSecond / 10 != (*st).wSecond / 10)
+	{
+		SetSegmentData(hwndSegment[4], (*st).wSecond / 10);
+		pst.wSecond = (*st).wSecond;
 
-}
+		//InvalidateRect(hwnd,&rectColor, TRUE);
+	}
+	// Draw minutes
+	if (pst.wMinute != (*st).wMinute || isCyclicColor)
+	{
+		SetSegmentData(hwndSegment[3], (*st).wMinute % 10);
+		SetSegmentData(hwndSegment[2], (*st).wMinute / 10);
+		pst.wMinute = (*st).wMinute;
+	}
+	// Draw hours
+	if (pst.wHour != (*st).wHour || isCyclicColor)
+	{
+		SetSegmentData(hwndSegment[1], (*st).wHour % 10);
+		SetSegmentData(hwndSegment[0], (*st).wHour / 10);
+		pst.wHour = (*st).wHour;
 
-int GetCyclicColorMode()
-{
-	int colorModeIndex = 0;
-
-	short colorR = GETR(lightPen) == 255 ? 1 : 0;
-	short colorG = GETG(lightPen) == 255 ? 1 : 0;
-	short colorB = GETB(lightPen) == 255 ? 1 : 0;
-
-	colorModeIndex |= (colorR << 2) | (colorG << 1) | (colorB << 0);
-	return colorModeIndex;
+		// Redraw date
+		InvalidateRect(hwnd, NULL, TRUE);
+	}
 }
 
 void SetCyclicColor()
 {
-	static int step=0;
-	static int  incR=0, incG=1, incB=0;
+	static int step = 0;
+	static int  incR = 0, incG = 1, incB = 0;
 
 	step += 1;
 	if (step > 255)
@@ -422,15 +327,19 @@ void SetCyclicColor()
 		if (++currentMode > 6)
 		{
 			currentMode = 1;
-			
+
 		};
 		incR = colorInc[currentMode][0];
 		incG = colorInc[currentMode][1];
 		incB = colorInc[currentMode][2];
 	};
 
-	int colorR = GETR(lightPen);
-	int colorG = GETG(lightPen);
-	int colorB = GETB(lightPen);
-	SetPenColor(COLORREF RGB(colorR+incR, colorG+incG, colorB+incB));
+	COLORREF color = GetSegmentColor();
+
+	int colorR = GetRValue(color);
+	int colorG = GetGValue(color);
+	int colorB = GetBValue(color);
+
+	SendMessage(hwndSegment[0], SSM_CHANGECOLOR, RGB(colorR + incR, colorG + incG, colorB + incB), NULL);
+
 }

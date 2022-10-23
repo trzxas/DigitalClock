@@ -18,5 +18,16 @@
     <ClCompile Include="DigitalClock.cc">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="Segment.cc">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Segment.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="DigitalClock.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
