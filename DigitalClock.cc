@@ -9,8 +9,12 @@ int countSegElem = sizeof(hwndSegment) / sizeof(HWND);
 
 HINSTANCE hInst;
 
-BOOL isCyclicColor = false;
+//BOOL isCyclicColor = false;
 int currentMode;
+
+bool isFullScreenMode = false;
+bool showDate = true;
+bool showWeekDay = true;
 
 int colorInc[7][3] = {
 	{0,0,0},	// not used
@@ -25,6 +29,9 @@ int colorInc[7][3] = {
 // day of week
 const TCHAR* dow[] = { TEXT("Sunday"), TEXT("Monday"), TEXT("Tuesday"),
 		TEXT("Wednesday"), TEXT("Thursday"), TEXT("Friday"), TEXT("Saturday") };
+
+// array of custom colors
+static COLORREF arrCustClr[16] = { RGB(255,0,0), RGB(0,255,0), RGB(0,0,255) };
 
 WORD cx, cy; // Client area size
 
@@ -77,8 +84,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 	UpdateWindow(hwnd);
 
 	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0) > 0)  // Read from message queue and fill msg structure
+	BOOL bRet;
+	while (bRet=GetMessage(&msg, NULL, 0, 0) > 0)  // Read from message queue and fill msg structure
 	{
+		if (bRet == -1)
+		{
+			// handle the error and possibly exit
+		}
+
 		//TranslateMessage(&msg);		// Convert keybord messages to symbol 
 		DispatchMessage(&msg);			// Call call-back window proc
 	}
@@ -89,23 +102,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
-	static BOOL isFullScreenMode = false;
-
 	static SYSTEMTIME st{};
 	PAINTSTRUCT ps;
 	HDC hdc;
-	DWORD dwStyle;
+	
 	DWORD commandID;
-	TCHAR colorInfo[64]{};
-
-
+	
 	int space;					// distance between  group
 	int totalWidth;				// total width of 6 segment elements with space
 
-	RECT rectColor = { 0,0,100,30 }; // color code position
-	RECT rectText{}; // text position
-
-	TCHAR text[1024];
+	RECT rectColor = { 0,0,100,30 };	// color code position
+	RECT rectText{};					// text position
+	
+	TCHAR colorInfo[64]{};
+	TCHAR text[256];
 	TCHAR date[12];
 
 	static HFONT hFontOriginal, hFont1;
@@ -114,14 +124,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 
 	switch (iMsg)
 	{
+	case WM_NCCREATE:
+		// Create additional fonts
+		hFont1 = CreateFont(100, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
+			CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
+		return true;
+
 	case WM_CREATE:  // without break! goto directly WM_TIMER to get init time
 		// Create and set main menu
 		hMenu = CreateMainMenu();
 		SetMenu(hwnd, hMenu);
-
-		// Create additional fonts
-		hFont1 = CreateFont(100, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
-			CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
+		CheckMenuItems();
 
 		// Create 7-segment elements
 		for (int i = 0; i < countSegElem; i++)
@@ -130,14 +143,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 				0, 0, 0, 0, hwnd, NULL, hInst, NULL);
 		}
 
-		// Set init color
+		// Set init color 
 		SendMessage(hwndSegment[0], SSM_CHANGECOLOR, RGB(255, 0, 0), NULL);
 		//PostMessage(hwnd, WM_COMMAND, IDM_CYCLIC, NULL);
 
 		// Set timer
 		if (!SetTimer(hwnd, ID_TIMER, 1000, NULL)) return EXIT_FAILURE;
 	case WM_TIMER:
-		if (isCyclicColor) SetCyclicColor();
 		GetLocalTime(&st);
 		DrawTime(&st);
 		break;
@@ -151,20 +163,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		// set big size font
 		hFontOriginal = (HFONT)SelectObject(hdc, hFont1);
 
-		// Draw day of week
-		lstrcpy(text, dow[st.wDayOfWeek]);
-		GetTextExtentPoint(hdc, text, lstrlen(text), &sizeText);
-		rectText.left = (cx - sizeText.cx) / 2;
-		rectText.right = rectText.left + sizeText.cx;
-		rectText.bottom = rectText.top + sizeText.cy;
-		DrawText(hdc, text, -1, &rectText, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-
-		// fill string with current date and get string length  
-		strCount = wsprintf(date, TEXT("%02d.%02d.%04d"), st.wDay,st.wMonth,st.wYear);
-		
-		// get string in pixels and draw date
-		GetTextExtentPoint(hdc, date, strCount, &size);
-		TextOut(hdc, (cx - size.cx) / 2, 3 * cy / 4, date, strCount);
+		if (showWeekDay)
+		{
+			// Draw a day of week
+			lstrcpy(text, dow[st.wDayOfWeek]);
+			GetTextExtentPoint(hdc, text, lstrlen(text), &sizeText);
+			rectText.left = (cx - sizeText.cx) / 2;
+			rectText.right = rectText.left + sizeText.cx;
+			rectText.bottom = rectText.top + sizeText.cy;
+			DrawText(hdc, text, -1, &rectText, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+		}
+		if (showDate)
+		{
+			// fill string with current date and get string length  
+			strCount = wsprintf(date, TEXT("%02d.%02d.%04d"), st.wDay, st.wMonth, st.wYear);
+			// get string in pixels and draw date
+			GetTextExtentPoint(hdc, date, strCount, &size);
+			TextOut(hdc, (cx - size.cx) / 2, cy - size.cy, date, strCount);
+		}
 
 		EndPaint(hwnd, &ps);
 		break;
@@ -174,69 +190,62 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		cy = HIWORD(lParam);
 		SetSegmentWidth(cx / 7);
 
-		space = wndWidth / 3;
+		space = wndWidth / 2;
 		totalWidth = 6 * wndWidth + 2 * space;
 
 		// Set 7-segmnet element position
 		for (int i = 0; i < countSegElem; i++)
 		{
 			SetWindowPos(hwndSegment[i], NULL,
-				(cx - totalWidth) / 2 + wndWidth * i + i / 2 * space, (cy - wndHeight) / 3,
+				(cx - totalWidth) / 2 + wndWidth * i + i / 2 * space, (cy - wndHeight) / 2,
 				wndWidth, wndHeight, SWP_NOZORDER);
 		}
 		break;
-	case WM_LBUTTONDBLCLK:
-		isFullScreenMode = ~isFullScreenMode;
-		dwStyle = GetWindowLong(hwnd, GWL_STYLE);
-		if (isFullScreenMode) // Set full-screen mode
+	
+	case WM_KEYDOWN:
+		switch (wParam)
 		{
-			SetMenu(hwnd, NULL);  // hide menu
-			SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW); // Change window style
-			SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+		case VK_ESCAPE:
+			if (isFullScreenMode) SetScreenMode(false);
+			break;
+		case VK_F11:
+			SetScreenMode(!isFullScreenMode);
+			break;
 		}
-		else // Set windowed mode
-		{
-			SetMenu(hwnd, hMenu); // show menu
-			SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW); // Change window style
-			SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
-		}
-		break;
 	case WM_COMMAND:
 		commandID = LOWORD(wParam); // get command ID
 		switch (commandID)
 		{
-		case IDM_SETREDCOLOR:
-			SetColor(RGB(255, 0, 0));
+		case IDM_CHOOSECOLOR:
+			ChooseDrawColor();
 			break;
-		case IDM_SETYELLOWCOLOR:
-			SetColor(RGB(255, 255, 0));
+		case IDM_SHOWDATE:
+			showDate = !showDate;
+			CheckMenuItems(); 
+			InvalidateRect(hwnd, NULL, true);
 			break;
-		case IDM_SETGREENCOLOR:
-			SetColor(RGB(0, 255, 0));
+		case IDM_SHOWWEEKDAY:
+			showWeekDay = !showWeekDay;
+			CheckMenuItems();
+			InvalidateRect(hwnd, NULL, true);
 			break;
-		case IDM_SETTURQUOISECOLOR:
-			SetColor(RGB(0, 255, 255));
-			break;
-		case IDM_SETBLUECOLOR:
-			SetColor(RGB(0, 0, 255));
-			break;
-		case IDM_SETPURPLECOLOR:
-			SetColor(RGB(255, 0, 255));
-			break;
-		case IDM_CYCLIC:
-			isCyclicColor = true; // Enable cyclic color mode;
-			currentMode = 1;
+		case IDM_FULLSCREEN: // Set full-screen mode
+			SetScreenMode(true);
 			break;
 		case  IDM_EXIT:
 			SendMessage(hwnd, WM_CLOSE, 0, 0L);
 			break;
 		}
-		CheckColorMenuItem(commandID);
 		break;
+
+	case WM_NCDESTROY:
+		if (hFont1 != NULL) DeleteObject(hFont1);
+		break;
+
 	case WM_DESTROY:
-		DeleteObject(hFont1);
 		PostQuitMessage(0);
 		break;
+
 	default:
 		return DefWindowProc(hwnd, iMsg, wParam, lParam);
 	}
@@ -248,40 +257,57 @@ HMENU CreateMainMenu()
 	HMENU hMenu = CreateMenu();
 
 	HMENU hMenuPopup = CreateMenu();
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETREDCOLOR, TEXT("Red"));
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETYELLOWCOLOR, TEXT("Yellow"));
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETGREENCOLOR, TEXT("Green"));
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETTURQUOISECOLOR, TEXT("Turquoise"));
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETBLUECOLOR, TEXT("Blue"));
-	AppendMenu(hMenuPopup, MF_STRING, IDM_SETPURPLECOLOR, TEXT("Purple"));
+	AppendMenu(hMenuPopup, MF_STRING, IDM_CHOOSECOLOR, TEXT("Color..."));
+	AppendMenu(hMenuPopup, MF_STRING, IDM_SHOWWEEKDAY, TEXT("Show weekday"));
+	AppendMenu(hMenuPopup, MF_STRING, IDM_SHOWDATE, TEXT("Show date"));
+	
 	AppendMenu(hMenuPopup, MF_SEPARATOR, 0, NULL);
-	AppendMenu(hMenuPopup, MF_STRING, IDM_CYCLIC, TEXT("Ñyclic"));
+	AppendMenu(hMenuPopup, MF_STRING, IDM_FULLSCREEN, TEXT("Full screen\tF11"));
 
 
-	AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hMenuPopup, TEXT("&Color"));
+	AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hMenuPopup, TEXT("&Settings"));
 	AppendMenu(hMenu, MF_STRING, IDM_EXIT, TEXT("E&xit"));
 
+	
 	return hMenu;
+}
+
+void ChooseDrawColor()
+{
+	CHOOSECOLOR cc;                
+
+	// Initialize CHOOSECOLOR 
+	ZeroMemory(&cc, sizeof(cc));
+	cc.lStructSize = sizeof(cc);
+	cc.hwndOwner = hwnd;
+	cc.lpCustColors = arrCustClr;
+	cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+	cc.rgbResult = GetSegmentColor();
+
+	if (ChooseColor(&cc) == TRUE)
+	{
+		//hbrush = CreateSolidBrush(cc.rgbResult);
+		SetColor(cc.rgbResult);
+	}
+
 }
 
 void SetColor(COLORREF color)
 {
-	isCyclicColor = false;
+	//isCyclicColor = false;
 	PostMessage(hwndSegment[0], SSM_CHANGECOLOR, color, NULL);
 	// Redraw window
 	InvalidateRect(hwnd, NULL, false);
 
 }
 
-void CheckColorMenuItem(DWORD item)
+void CheckMenuItems()
 {
-	if (item > FIRSTCOLOR && item <= IDM_CYCLIC)  // Check if its Menu Color Command 
-	{
-		for (DWORD i = FIRSTCOLOR + 1; i <= IDM_CYCLIC; i++)
-		{
-			if (item == i) CheckMenuItem(hMenu, item, MF_CHECKED); else CheckMenuItem(hMenu, i, MF_UNCHECKED);
-		}
-	}
+	//MF_CHECKED=8 or MF_UNCHECKED=0
+	
+	CheckMenuItem(hMenu, IDM_SHOWWEEKDAY, showWeekDay << 3); 
+	CheckMenuItem(hMenu, IDM_SHOWDATE, showDate << 3);
+	CheckMenuItem(hMenu, IDM_FULLSCREEN, isFullScreenMode << 3);
 }
 
 void DrawTime(SYSTEMTIME* st)
@@ -297,21 +323,39 @@ void DrawTime(SYSTEMTIME* st)
 		//InvalidateRect(hwnd,&rectColor, TRUE);
 	}
 	// Draw minutes
-	if (pst.wMinute != (*st).wMinute || isCyclicColor)
+	if (pst.wMinute != (*st).wMinute)
 	{
 		SetSegmentData(hwndSegment[3], (*st).wMinute % 10);
 		SetSegmentData(hwndSegment[2], (*st).wMinute / 10);
 		pst.wMinute = (*st).wMinute;
 	}
 	// Draw hours
-	if (pst.wHour != (*st).wHour || isCyclicColor)
+	if (pst.wHour != (*st).wHour)
 	{
 		SetSegmentData(hwndSegment[1], (*st).wHour % 10);
 		SetSegmentData(hwndSegment[0], (*st).wHour / 10);
 		pst.wHour = (*st).wHour;
 
-		// Redraw date
+		// Redraw date (each hour)
 		InvalidateRect(hwnd, NULL, TRUE);
+	}
+}
+
+void SetScreenMode(bool flag)
+{
+	DWORD dwStyle= GetWindowLong(hwnd, GWL_STYLE);
+	isFullScreenMode = flag;
+	if (!flag)  
+	{
+		SetMenu(hwnd, hMenu); // show menu
+		SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW); // Change window style
+		SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+	}
+	else
+	{
+		SetMenu(hwnd, NULL);  // hide menu
+		SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW); // Change window style
+		SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
 	}
 }
 

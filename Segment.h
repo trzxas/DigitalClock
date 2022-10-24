@@ -26,6 +26,7 @@ void CustomUnregister(void);
 /* Other function descriptions */
 void SetSegmentWidth(int);
 void SetSegmentData(HWND hwnd, WORD data);
+void SetSegmentColor(COLORREF color);
 COLORREF GetSegmentColor();
 
 //#endif  /* CUSTOM_H */

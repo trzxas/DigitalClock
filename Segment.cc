@@ -33,7 +33,7 @@ int wndWidth, wndHeight;	// width and height element window
 
 
 // Colors
-COLORREF lightPen;
+static COLORREF lightPen;
 static COLORREF darkPen;
 static COLORREF BLACK = RGB(0, 0, 0);
 
@@ -48,15 +48,11 @@ typedef struct CustomWndData_tag {
 
 static CustomClassData* extClassData;
 
-
 // static  proc from winCallBack
 static void CustomPaint(HWND hwnd);
 static void Draw7Seg(HDC hdc, byte dig);
 static void DrawSegment(HDC hdc, int index);
-static int  TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate = 0);
-
-// function declaration
-void SetSegmentColor(COLORREF color);
+static void TransformPoints(POINT* pts, POINT* ptd, int dx, int dy);
 
 static LRESULT CALLBACK CustomProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -119,10 +115,13 @@ static void CustomPaint(HWND hwnd)
 	byte digit = (ptrw->data) % 16;
 
 	hdc = BeginPaint(hwnd, &ps);
-	//MoveTo(hdc ,0,0);
-	//LineTo(hdc, rect.right, 0);
-	//Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
-	Draw7Seg(hdc, digit);			// Draw segments
+
+	// Just for visual check real client rectangle  area
+	//FrameRect(hdc, &rect, CreateSolidBrush(ptrc->lightPen));
+
+	// Draw segments
+	Draw7Seg(hdc, digit);
+
 	EndPaint(hwnd, &ps);
 }
 
@@ -155,22 +154,22 @@ void CustomUnregister(void)
 
 void SetSegmentWidth(int wndX)
 {
-	static float degree = 5;								// skew degree angle of segment (0-6 optimal)
+	static float degree = 4;								// skew angle of segment (0-6 optimal)
 
 	wndWidth = wndX;										// total window height (incl padding, extX)
-	int primeCoef = wndWidth / 5;
-
-	int padding = primeCoef/4;								// window padding
-	int segLength = wndWidth - 2 * padding - primeCoef;		// length of segment (not depend on skew)
-	int segThickness = max(primeCoef, 2);					// thickness of segment
+	
+	int segThickness = max(wndWidth / 5, 2);				// thickness of segment
 	int th2 = segThickness / 2;								// thickness/2 , just for convenience, it's use often
+	int padding = segThickness / 4;							// window padding
+	int segLength = wndWidth - 2 * padding - segThickness;	// length of segment (not depend on skew)
+	
 	int xSize = wndWidth - 2 * padding;						// width of element (w/o padding)
 	int ySize = 2 * segLength + segThickness;				// height of element  (w/o padding)
 
 	int extX = (int)(segLength * tan(RAD(degree)));			// skew (horisontal extension)
 	int thickExt = (int)(th2 * tan(RAD(degree)));			// skew depend on thickness
 
-	int horSegLength = segLength - extX;					// horisontal segment length depend on skew
+	int horSegLength = segLength - 2 * extX;				// horisontal segment length depend on skew
 
 	wndHeight = ySize + 2 * padding;						// total window height
 
@@ -182,9 +181,9 @@ void SetSegmentWidth(int wndX)
 	// Vertical segment sample 
 	POINT vertSegment[sizePT]{							//		  *
 		{extX,0},										//		*   *
-		{th2+extX-thickExt,th2},						//		|	|
+		{th2 + extX - thickExt,th2},					//		|	|
 		{th2,segLength - th2 },							//		|	|
-		{0, segLength - 1},								//		*	*
+		{0, segLength },								//		*	*
 		{-th2 ,segLength - th2 },						//		  *
 		{-th2 + extX - thickExt,th2},
 	};
@@ -197,32 +196,26 @@ void SetSegmentWidth(int wndX)
 		{horSegLength,0},
 		{horSegLength - th2,th2},
 		{th2,th2},
-		};								
-	
+	};
+
 	// Samples for all (7) segment  
-	TransformPoints(horSegment, pt[0], left + 2*extX, top);							// A
-	TransformPoints(vertSegment, pt[1], left + horSegLength+extX, top, 0);			// B	
-	TransformPoints(vertSegment, pt[2], left + horSegLength, vertCenter, 0);		// C
-	TransformPoints(horSegment, pt[3], left, bottom);								// D	(no changed by a skew)
-	TransformPoints(vertSegment, pt[4], left, vertCenter,0 );						// E
-	TransformPoints(vertSegment, pt[5], left+extX, top, 0);							// F
-	TransformPoints(horSegment, pt[6], left + extX, vertCenter);					// G
+	TransformPoints(horSegment, pt[0], left + 2 * extX, top);					// A
+	TransformPoints(vertSegment, pt[1], left + horSegLength + extX, top);		// B	
+	TransformPoints(vertSegment, pt[2], left + horSegLength, vertCenter);		// C
+	TransformPoints(horSegment, pt[3], left, bottom);							// D	(no changed by a skew)
+	TransformPoints(vertSegment, pt[4], left, vertCenter);						// E
+	TransformPoints(vertSegment, pt[5], left + extX, top);						// F
+	TransformPoints(horSegment, pt[6], left + extX, vertCenter);				// G
 
 
 }
 
-
-
 static void Draw7Seg(HDC hdc, byte dig)
 {
-	//RECT rect1{ 0,0,xSize,ySize };
 
 	SelectObject(hdc, GetStockObject(DC_BRUSH));
 	SelectObject(hdc, GetStockObject(DC_PEN));
 	SetDCPenColor(hdc, darkPen);
-
-	// Just for visual check real rect area
-	//Rectangle(hdc, rect1.left, rect1.top, rect1.right, rect1.bottom);
 
 	for (int i = 0; i < 7; i++)
 	{
@@ -248,19 +241,15 @@ static void DrawSegment(HDC hdc, int index)
 	Polygon(hdc, ptDraw, sizePT);
 }
 
-static int TransformPoints(POINT* pts, POINT* ptd, int dx, int dy, int rotate)
+static void TransformPoints(POINT* pts, POINT* ptd, int dx, int dy)
 {
-	//int grdAngle = (int)(0 + degree); // not necessary
-	//double angle = RAD(grdAngle);
+
 	for (int i = 0; i < sizePT; i++)
 	{
 		ptd[i].x = pts[i].x + dx;
 		ptd[i].y = pts[i].y + dy;
-
-		/*ptd[i].x = (LONG)(rotate == 0 ? pts[i].x + dx : pts[i].x * cos(angle) - pts[i].y * sin(angle) + dx);
-		ptd[i].y = (LONG)(rotate == 0 ? pts[i].y + dy : pts[i].x * sin(angle) + pts[i].y * cos(angle) + dy);*/
 	}
-	return sizePT;
+
 }
 
 void SetSegmentColor(COLORREF newColor)
@@ -284,6 +273,6 @@ COLORREF GetSegmentColor()
 void SetSegmentData(HWND hwnd, WORD data)
 {
 	CustomWndData* ptrw = (CustomWndData*)GetWindowLongPtr(hwnd, 0);
-	ptrw->data = data;
+	ptrw->data = (byte)data;
 	InvalidateRect(hwnd, nullptr, TRUE);
 }
